@@ -12,9 +12,6 @@ const port = 3000
 const __filename = new URL('', import.meta.url).pathname
 const __dirname = new URL('.', import.meta.url).pathname
 
-// Variables ===========================================================
-let users
-
 // Create Turn Server ===========================================================
 const server = new Turn({
 	//debugLevel: 'ALL',
