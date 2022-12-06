@@ -1,2 +1,2 @@
 # easy-webrtc
-Simple implementation of webrtc videoconference system
+Simple implementation of webrtc videoconference system. Using nodejs
