@@ -1,0 +1,17 @@
+{
+  "name": "Mediastream",
+  "version": "1.0.0",
+  "description": "Testig mediatream",
+  "main": "app.mjs",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Cesar Morillas",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.18.2",
+    "node-turn": "^0.0.6",
+    "socket.io": "^4.5.3"
+  }
+}

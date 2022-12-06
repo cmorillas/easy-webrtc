@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script>
+
+window.addEventListener('load', async (e) => {
+	let peer
+	const ip_host = new Set(), ip_srflx = new Set(), ip_relay = new Set()
+	const {io} = await import('/socket.io/socket.io.esm.min.js')
+	const socket = io({reconnection: false, transports: ["websocket"]})
+	
+	const constraints = {audio: true, video: {width: { min: 240, ideal: 480, max: 480 } } }
+	const localStream = await navigator.mediaDevices.getUserMedia(constraints)
+	document.querySelector('#local-video').srcObject = localStream
+
+
+	//=============================== DOM Event Listeners ===================================================/
+	document.querySelector("#join").addEventListener("click", (e) => {
+		const username = document.querySelector("#username").value
+		socket.emit('join', username, (response) => {
+			if(response=='ok') {
+				document.querySelector("#login").style.display = 'none'
+				document.querySelector("#header").style.display = 'inherit'
+				document.querySelector("#user").innerHTML = username
+			}
+			else {
+				document.querySelector("#user-error").style.display = 'inherit'
+			}
+		}) 
+	})
+
+	document.querySelector("#call").addEventListener("click", (e) => {
+		const caller = document.querySelector("#username").value
+		const callee = document.querySelector("#callee").value
+		socket.emit('call', callee, async(response) => {
+			if(response!='ok') {
+				document.querySelector("#callee-error").style.visibility = 'visible'
+				return
+			}			
+			document.querySelector("#callee-error").style.visibility = 'hidden'
+			document.querySelector("#call-state").innerHTML = 'Calling to: '+callee
+			document.querySelector("#call").disabled = true
+			document.querySelector("#callee").disabled = true
+			document.querySelector("#hangup").disabled = false
+		
+			set_peer()
+			add_tracks()
+		})
+	})
+
+	document.querySelector("#answer").addEventListener("click", (e) => {
+		document.querySelector("#answer").style.visibility = 'hidden'
+		document.querySelector("#call-state").innerHTML = 'In communication'
+		add_tracks()
+	})
+
+	document.querySelector("#hangup").addEventListener("click", (e) => {
+		close_peer()		
+	    socket.emit('hangup')
+	})
+
+
+	//=============================== Socket Messages ===================================================/
+	socket.on('call', async (caller, callback) => {		
+		document.querySelector("#call-state").innerHTML = 'Incoming call from: '+caller
+		document.querySelector("#call").disabled = true
+		document.querySelector("#callee").disabled = true
+		document.querySelector("#hangup").disabled = false
+		document.querySelector("#answer").style.display = 'inline-block'
+		set_peer()
+		callback('ok')
+	})
+	socket.on('hangup', async (msg, callback) => {
+		close_peer()
+	})
+
+	socket.on('disconnect', async (reason) => {
+		console.log(reason)
+		mediaStream.getTracks().forEach(track => track.stop())
+	})
+
+	//=============================== Socket Webrtc Messages ===================================================/
+	socket.on('offer', async (offer, callback) => {
+		await peer.setRemoteDescription(offer)   	
+		const answer = await peer.createAnswer()		
+		await peer.setLocalDescription(answer)
+		callback(answer)
+	})
+
+	socket.on('icecandidate', async (icecandidate, callback) => {	
+		const candidate_arr = icecandidate ? icecandidate.candidate.split(" ") : []
+		if(candidate_arr[7]=='srflx') {}		
+		await peer.addIceCandidate(icecandidate)
+	})
+	
+
+	//=============================== Functions ===================================================/
+	function set_peer() {
+		const configuration = {iceServers: [
+			{urls: "stun:openrelay.metered.ca:80"},
+			{urls: "turn:test.telytec.com:3478", username: "username", credential: "password"},
+			//{urls: "turn:openrelay.metered.ca:80", username: "openrelayproject", credential: "openrelayproject"}
+		]}
+		peer = new RTCPeerConnection(configuration)
+
+		peer.addEventListener("negotiationneeded", negotiationneeded)			// 1º. Fired after peer.addTransceiver()
+		peer.addEventListener("icecandidate", icecandidate)						// 2º. Fired after peer.createOffer()
+		peer.addEventListener("connectionstatechange", connectionstatechange)	// 3º. Fired when finish icegathering 
+		peer.addEventListener("track", track)									// 4º. Fired when track added on the callee
+
+		async function negotiationneeded(e) {
+			const offer = await peer.createOffer()	
+	    	await peer.setLocalDescription(offer)	    	
+	    	socket.emit('offer', offer, async (response) => {
+				await peer.setRemoteDescription(response)
+			})
+		}
+		async function icecandidate(e) {		
+			const candidate = e.candidate
+			if(candidate?.type=="host")  ip_host.add(candidate.address)
+			if(candidate?.type=="srflx") ip_srflx.add(candidate.address)
+			if(candidate?.type=="relay") ip_relay.add(candidate.address)			
+	    	socket.emit('icecandidate', candidate)
+		}
+		async function connectionstatechange(e) {			
+			if(peer.connectionState=='connected') {
+				document.querySelector("#call-state").innerHTML = 'Connected'
+				document.querySelector("#ip-private").innerHTML = 'Private IP: ' + [...ip_host].join(', ')
+				document.querySelector("#ip-public").innerHTML = 'Public IP: ' + [...ip_srflx].join(', ')
+				document.querySelector("#ip-relay").innerHTML = 'Relay IP: ' + [...ip_relay].join(', ')
+				//const selected_ice = peer.getSenders()[0].transport.iceTransport.getSelectedCandidatePair()
+				//const connection = selected_ice.local.protocol + " " + selected_ice.local.address + ":" + selected_ice.local.port + " <==> " + selected_ice.remote.protocol + " " + selected_ice.remote.address + ":" + selected_ice.remote.port
+				const stats = await peer.getStats()
+				const candidates = stats.get('T01').selectedCandidatePairId ?? ""
+				const local = stats.get(stats.get(candidates).localCandidateId)
+				const remote = stats.get(stats.get(candidates).remoteCandidateId)	
+				//console.log([...stats])
+				
+				document.querySelector("#connected-pair").innerHTML = local.candidateType + ' ' + local.protocol + ' ' + 
+					local.ip + ':' + local.port + ' <==> ' + remote.candidateType + ' ' + remote.protocol + ' ' +
+					remote.ip + ':' + remote.port
+			}
+		}
+		async function track(e) {
+			document.querySelector('#remote-video').srcObject = e.streams[0]
+		}
+	}
+
+	function add_tracks() {
+		localStream.getTracks().forEach( async (track) => {		// It fires "negotiationneeded" event
+			const transceiver = peer.addTransceiver(track, {direction:'sendrecv', sendEncodings:[{maxBitrate:8000000, maxFramerate:30}], streams:[localStream]})		
+		})
+	}
+
+	function close_peer() {
+		peer.getSenders().forEach(sender => peer.removeTrack(sender))
+		peer.close()
+		document.querySelector("#call").disabled = false
+		document.querySelector("#callee").disabled = false
+		document.querySelector("#hangup").disabled = true
+		document.querySelector("#call-state").innerHTML = 'Ready'
+	}
+})
+
+</script>
+</head>
+<body style="max-width: 60em; margin:0 auto 0 auto">
+	<div id="login" style="margin-bottom:10px">
+		<p style="margin-bottom:5px">Username</p>
+		<input type="text" id="username"></input><button id="join" style="margin-left:10px">Join</button>
+		<p id="user-error" style="font-size:0.8rem; color:red; margin-top:4px; display:none">User already exists</p>
+	</div>
+	<div id="header" style="margin-bottom:10px; display:none;">
+		<h1>User: <span id="user"></span></h1>
+		<p style="margin-bottom:5px">Call to:</p>
+		<input type="text" id="callee"></input>
+		<button id="call" style="margin-left:10px">Call</button>
+		<button id="hangup" style="margin-left:10px" disabled>Hang up</button>
+		<button id="answer" style="margin-left:10px; display:none">Answer</button>
+		<p id="callee-error" style="font-size:0.8rem; color:red; margin-top:4px; visibility:hidden;">Invalid callee</p>
+		<p id="call-state"></p>
+	</div>
+
+	<video id="local-video" style="width:45%" autoplay playsinline muted ></video>
+	<video id="remote-video" style="width:45%" autoplay playsinline muted></video>
+	<div>
+		<p id="ip-private"></p>
+		<p id="ip-public"></p>
+		<p id="ip-relay"></p>
+	</div>
+	<p id="connected-pair"></p>
+	<div id="info"></div>
+</body>
+</html>
