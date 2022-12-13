@@ -12,6 +12,9 @@ const port = 3000
 const __filename = new URL('', import.meta.url).pathname
 const __dirname = new URL('.', import.meta.url).pathname
 
+// Variables ===========================================================
+let users
+
 // Create Turn Server ===========================================================
 const server = new Turn({
 	//debugLevel: 'ALL',
@@ -40,6 +43,7 @@ io.on('connection', (socket) => {
 	socket.on('disconnect', (reason) => { disconnect(socket, reason) })	
 	socket.on('join', async (msg, callback) => { await join(socket, msg, callback) })
 	socket.on('call', async (msg, callback) => { await call(socket, msg, callback) })
+	socket.on('answer', async (msg, callback) => { await answer(socket, msg, callback) })
 	socket.on('hangup', async (msg, callback) => { await hangup(socket, msg, callback) })
 	
 	socket.on('offer', async (msg, callback) => { await offer(socket, msg, callback) })
@@ -74,11 +78,16 @@ async function call(socket, callee, callback) {
 		(response=='ok') ? callback('ok') : callback('fail')
 	})
 }
+async function answer(socket, msg, callback) {
+	const callee = socket.data.user
+	const toSocket = (await io.fetchSockets()).find(sock => sock.data.user==socket.data.paired_with)
+	if(toSocket) toSocket.emit("answer", callee)
+}
 async function hangup(socket, msg, callback) {
 	const toSocket = (await io.fetchSockets()).find(sock => sock.data.user==socket.data.paired_with)
 	socket.data.paired_with = false
 	toSocket.data.paired_with = false
-	toSocket.emit("hangup")	
+	toSocket.emit("hangup")
 }
 
 async function offer(socket, offer, callback) {

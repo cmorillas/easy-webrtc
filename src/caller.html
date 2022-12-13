@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
 <script>
-
+const audio = new Audio("ringtone.mp3")
+audio.loop = true
 window.addEventListener('load', async (e) => {
 	let peer
 	const ip_host = new Set(), ip_srflx = new Set(), ip_relay = new Set()
@@ -41,20 +42,24 @@ window.addEventListener('load', async (e) => {
 			document.querySelector("#call-state").innerHTML = 'Calling to: '+callee
 			document.querySelector("#call").disabled = true
 			document.querySelector("#callee").disabled = true
-			document.querySelector("#hangup").disabled = false
-		
+			document.querySelector("#hangup").disabled = false		
 			set_peer()
-			add_tracks()
+			add_tracks() 
+			audio.play()
 		})
 	})
 
 	document.querySelector("#answer").addEventListener("click", (e) => {
-		document.querySelector("#answer").style.visibility = 'hidden'
+		document.querySelector("#answer").disabled = true
 		document.querySelector("#call-state").innerHTML = 'In communication'
+		audio.pause()
+		socket.emit('answer')
 		add_tracks()
 	})
 
-	document.querySelector("#hangup").addEventListener("click", (e) => {
+	document.querySelector("#hangup").addEventListener("click", (e) => {		
+		document.querySelector("#answer").disabled = true
+		audio.pause()
 		close_peer()		
 	    socket.emit('hangup')
 	})
@@ -66,17 +71,27 @@ window.addEventListener('load', async (e) => {
 		document.querySelector("#call").disabled = true
 		document.querySelector("#callee").disabled = true
 		document.querySelector("#hangup").disabled = false
-		document.querySelector("#answer").style.display = 'inline-block'
+		document.querySelector("#answer").disabled = false		
+		audio.play()
 		set_peer()
 		callback('ok')
 	})
-	socket.on('hangup', async (msg, callback) => {
+	socket.on('answer', async (callee, callback) => {
+		document.querySelector("#call-state").innerHTML = 'Established communication with: '+callee
+		audio.pause()
+	})
+	socket.on('hangup', async (msg, callback) => {	
+		document.querySelector("#answer").disabled = true
+		audio.pause()	
 		close_peer()
 	})
 
 	socket.on('disconnect', async (reason) => {
 		console.log(reason)
-		mediaStream.getTracks().forEach(track => track.stop())
+		//document.querySelector("#header").style.display = 'none'
+		//document.querySelector("#login").style.display = 'inherit'
+		location.reload()		
+		//mediaStream.getTracks().forEach(track => track.stop())		
 	})
 
 	//=============================== Socket Webrtc Messages ===================================================/
@@ -176,13 +191,13 @@ window.addEventListener('load', async (e) => {
 		<input type="text" id="callee"></input>
 		<button id="call" style="margin-left:10px">Call</button>
 		<button id="hangup" style="margin-left:10px" disabled>Hang up</button>
-		<button id="answer" style="margin-left:10px; display:none">Answer</button>
+		<button id="answer" style="margin-left:10px" disabled>Answer</button>
 		<p id="callee-error" style="font-size:0.8rem; color:red; margin-top:4px; visibility:hidden;">Invalid callee</p>
 		<p id="call-state"></p>
 	</div>
 
-	<video id="local-video" style="width:45%" autoplay playsinline muted ></video>
-	<video id="remote-video" style="width:45%" autoplay playsinline muted></video>
+	<video id="local-video" style="width:45%" autoplay playsinline muted></video>
+	<video id="remote-video" style="width:45%" autoplay playsinline ></video>
 	<div>
 		<p id="ip-private"></p>
 		<p id="ip-public"></p>
